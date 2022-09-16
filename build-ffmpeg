@@ -1,0 +1,156 @@
+#! /bin/bash
+set -e
+
+# ========== Version Settings ==========
+SRT_VERSION="1.5.0" # CHANGE VERSION WHEN NEEDED - change srt version as needed
+FFMPEG_VERSION="5.1.1" # CHANGE VERSION WHEN NEEDED - see ffmpeg versions here: http://ffmpeg.org/releases/
+# =====================================
+
+function wait_input {
+    read -p "When done, press y to continue install... " choice
+    case "$choice" in 
+        y|Y ) printf "Continuing...\n\n";;
+        * ) wait_input;;
+    esac
+}
+
+function install_nv_codec_headers {
+    printf "Installing nv codec headers... \n"
+    echo "FFmpeg version of headers required to interface with Nvidias codec APIs."
+    cd $HOME;
+    git clone https://git.videolan.org/git/ffmpeg/nv-codec-headers.git nvch;
+    cd nvch && make && make install;
+    rm -rf nvch #cleanup
+}
+
+function manual_install_cuda_toolkit {
+    printf "\n\n======== Manually install CUDA Toolkit =======\n"
+    printf "Go to: %s\n" "https://developer.nvidia.com/cuda-downloads"
+    printf "At \"Installer Type\" make sure to select \"deb (network)\" and run the instructions\n"
+    wait_input
+}
+
+function download_blackmagic {
+    printf "\n\n======== Download Blackmagic Software =======\n"
+    printf "Go to: %s\n" "https://www.blackmagicdesign.com/support/family/capture-and-playback"
+    printf "Download following libraries to the HOME/Downloads directory: \n"
+    printf "\t 1. Desktop Video\n"
+    printf "\t 2. Desktop Video SDK\n"
+    wait_input
+}
+
+function install_blackmagic_desktop_video {
+    printf "Installing Blackmagic Desktop Video... \n"
+    cd $HOME/Downloads
+    tar -xf Blackmagic_Desktop_Video_Linux_*.tar
+    rm -f Blackmagic_Desktop_Video_Linux_*.tar #cleanup
+    cd Blackmagic_Desktop_Video_Linux_*/deb/x86_64/
+    sudo dpkg -i desktopvideo_*.deb
+    sudo apt-get install -f
+    rm -rf $HOME/Downloads/Blackmagic_Desktop_Video_Linux_* #cleanup
+}
+
+function install_blackmagic_decklink_sdk {
+    printf "\nCopying Blackmagic Decklink SDK files... \n"
+    cd $HOME/Downloads
+    apt install -y unzip
+    unzip Blackmagic_DeckLink_SDK_*.zip
+    cp -r Blackmagic\ DeckLink\ SDK\ */Linux/ $HOME/ffmpeg_sources/BMD_SDK
+    rm -rf $HOME/Downloads/Blackmagic* #cleanup
+}
+
+function install_apt_deps {
+    printf "\nInstalling ffmpeg prerequisites... \n"
+    apt-get update -qq && sudo apt-get -y install \
+        autoconf \
+        automake \
+        build-essential \
+        cmake \
+        git-core \
+        libass-dev \
+        libfreetype6-dev \
+        libtool \
+        libvorbis-dev \
+        pkg-config \
+        texinfo \
+        wget \
+        zlib1g-dev \
+        libssl-dev \
+        tclsh \
+        ninja-build
+
+    apt-get -y install \
+        nasm yasm libx264-dev libx265-dev libnuma-dev libvpx-dev \
+        libfdk-aac-dev libmp3lame-dev libopus-dev
+}
+
+function install_srt_deps {
+    printf "\nInstalling SRT library... \n"
+    cd $HOME
+    git clone https://github.com/Haivision/srt.git srt
+    cd srt/
+    git checkout -b work v${SRT_VERSION}
+    ./configure && make && make install
+}
+
+function compile_ffmpeg {
+    printf "\nCompiling ffmpeg... \n"
+    cd $HOME/ffmpeg_sources
+    wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2
+    tar -xvf ffmpeg-*.tar.bz2
+    rm ffmpeg-*.tar.bz2 # cleanup
+    cd ffmpeg-*/
+    PATH="$HOME/bin:$PATH" PKG_CONFIG_PATH="$HOME/ffmpeg_build/lib/pkgconfig" ./configure \
+        --prefix="$HOME/ffmpeg_build" \
+        --pkg-config-flags="--static" \
+        --extra-cflags="-I$HOME/ffmpeg_build/include -I$HOME/ffmpeg_sources/BMD_SDK/include -I/usr/local/cuda/include" \
+        --extra-ldflags="-L$HOME/ffmpeg_build/lib -L/usr/local/cuda/lib64" \
+        --extra-libs="-lpthread -lm" \
+        --ld="g++" \
+        --bindir="$HOME/bin" \
+        --enable-gpl \
+        --enable-libass \
+        --enable-libfdk-aac \
+        --enable-libfreetype \
+        --enable-libmp3lame \
+        --enable-libopus \
+        --enable-libvorbis \
+        --enable-libvpx \
+        --enable-libx264 \
+        --enable-libx265 \
+        --enable-nonfree \
+        --enable-decklink \
+        --enable-cuda-nvcc \
+        --enable-libnpp \
+        --enable-pic \
+        --enable-cuvid \
+        --enable-nvenc \
+        --enable-static \
+        --disable-shared \
+        --enable-libsrt
+
+    PATH="$HOME/bin:$PATH" make -j `nproc`
+    make install
+    cp ffmpeg ffprobe /usr/local/bin/
+}
+
+function cleanup {
+    rm -rf $HOME/ffmpeg_sources $HOME/ffmpeg_build $HOME/bin $HOME/nvch $HOME/srt
+}
+
+printf "To abort press CTRL + C\n\n"
+printf "Versions being compiled\n"
+printf "srt: %s\n" $SRT_VERSION
+printf "ffmpeg: %s\n" $FFMPEG_VERSION
+
+cleanup
+mkdir -p $HOME/ffmpeg_sources $HOME/bin
+install_apt_deps
+manual_install_cuda_toolkit
+install_nv_codec_headers
+download_blackmagic
+install_blackmagic_desktop_video
+install_blackmagic_decklink_sdk
+install_srt_deps
+compile_ffmpeg
+printf "\n\nALL DONE 🎉🎉🎉\n"
