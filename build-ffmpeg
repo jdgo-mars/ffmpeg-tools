@@ -95,6 +95,8 @@ function install_srt_deps {
 
 function compile_ffmpeg {
     printf "\nCompiling ffmpeg... \n"
+    echo "export PATH=$PATH:/usr/local/cuda/bin" >> $HOME/.profile
+    source $HOME/.profile
     cd $HOME/ffmpeg_sources
     wget https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.bz2
     tar -xvf ffmpeg-*.tar.bz2
